@@ -30,7 +30,7 @@ public static class AppStateStore
         }
         catch
         {
-            // если state битый - просто стартуем с пустого, без драммы
+            // if state is corrupted - just start with an empty one, no drama
             return new AppState();
         }
     }

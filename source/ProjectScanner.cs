@@ -91,8 +91,17 @@ public static class ProjectScanner
         return result;
     }
 
-    public static string BuildReportForSelection(ProjectNode selected, ISet<ProjectNode>? includedNodes = null) {
-        bool IsIncluded(ProjectNode n) => includedNodes is null || includedNodes.Contains(n);
+    public static string BuildReportForSelection(ProjectNode selected, ISet<string>? includedFilePaths = null) {
+        bool IsIncluded(ProjectNode n) {
+            if (includedFilePaths is null)
+                return true;
+
+            return n.Kind switch {
+                NodeKind.File => includedFilePaths.Contains(n.FullPath),
+                _ => n.DescendantsAndSelf()
+                    .Any(x => x.Kind == NodeKind.File && includedFilePaths.Contains(x.FullPath))
+            };
+        }
 
         var solution = selected.Kind == NodeKind.Solution
             ? selected
@@ -123,7 +132,7 @@ public static class ProjectScanner
         var files = filesRoot
             .DescendantsAndSelf()
             .Where(x => x.Kind == NodeKind.File)
-            .Where(IsIncluded)
+            .Where(x => includedFilePaths is null || includedFilePaths.Contains(x.FullPath))
             .OrderBy(x => GetDisplayPath(solution, x), StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -149,7 +158,6 @@ public static class ProjectScanner
 
         return sb.ToString().TrimEnd();
     }
-
 
     private static void AppendSolutionStructure(
         StringBuilder sb,

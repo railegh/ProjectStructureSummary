@@ -2,7 +2,9 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
+
 
 namespace ProjectStructureSummary;
 
@@ -19,9 +21,17 @@ public sealed  class MainForm : Form {
     private readonly TreeView _tree = new();
     private readonly RichTextBox _rtbOutput = new();
     private readonly ImageList _treeImages = new();
+    private readonly ImageList _checkImages = new();
+
     private readonly Button _btnCopy = new();
     private List<ProjectNode> _solutions = new();
     private bool _isUpdatingChecks;
+    private bool _isGeneratingReport;
+
+    private readonly HashSet<string> _includedFilePaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Windows.Forms.Timer _reportTimer = new() { Interval = 120 };
+
+
     public MainForm() {
         Text = "C# Solution Explorer + Structure/Code Viewer";
         StartPosition = FormStartPosition.CenterScreen;
@@ -60,7 +70,7 @@ public sealed  class MainForm : Form {
         _btnCopy.Text = "Copy";
         _btnCopy.AutoSize = true;
         _btnCopy.Margin = new Padding(8, 0, 0, 0);
-        _btnCopy.Enabled = false; // пока пусто — выключена
+        _btnCopy.Enabled = false; // while empty — disabled
 
 
         _cbAddAcknowledge.Text = "Acknowledge Phrase";
@@ -125,12 +135,48 @@ public sealed  class MainForm : Form {
         _tree.ShowLines = true;
         _tree.ShowPlusMinus = true;
         _tree.ShowRootLines = true;
-        _tree.CheckBoxes = true;
-            
+        _tree.CheckBoxes = false;
+
         SetupTreeIcons();
+        SetupCheckIcons();
+
         _tree.ImageList = _treeImages;
+        _tree.StateImageList = _checkImages;
     }
 
+
+    private void SetupCheckIcons() {
+        _checkImages.ColorDepth = ColorDepth.Depth32Bit;
+        _checkImages.ImageSize = new Size(16, 16);
+
+        _checkImages.Images.Clear();
+        _checkImages.Images.Add(CreateCheckIcon(false));
+        _checkImages.Images.Add(CreateCheckIcon(true));
+    }
+
+    private static Bitmap CreateCheckIcon(bool isChecked) {
+        var bmp = new Bitmap(16, 16);
+
+        using var g = Graphics.FromImage(bmp);
+        g.Clear(Color.Transparent);
+
+        var rect = new Rectangle(2, 2, 12, 12);
+
+        using var bg = new SolidBrush(Color.White);
+        using var border = new Pen(Color.FromArgb(90, 90, 90));
+
+        g.FillRectangle(bg, rect);
+        g.DrawRectangle(border, rect);
+
+        if (isChecked) {
+            using var pen = new Pen(Color.FromArgb(30, 30, 30), 2f);
+
+            g.DrawLine(pen, 4, 8, 7, 11);
+            g.DrawLine(pen, 7, 11, 12, 5);
+        }
+
+        return bmp;
+    }
     private void ConfigureOutput() {
         _rtbOutput.Dock = DockStyle.Fill;
         _rtbOutput.Font = new Font("Consolas", 10f);
@@ -192,7 +238,7 @@ public sealed  class MainForm : Form {
 
         _btnBrowse.Click += (_, _) => {
             using var dlg = new FolderBrowserDialog {
-                Description = "Выберите папку с C# solution / project",
+                Description = "Select a folder with C# solution / project",
                 UseDescriptionForTitle = true,
                 ShowNewFolderButton = false
             };
@@ -208,84 +254,123 @@ public sealed  class MainForm : Form {
 
         _btnScan.Click += (_, _) => ReloadTree();
 
-        _tree.AfterSelect += (_, _) => RefreshOutputForCurrentSelection();
-        _tree.AfterCheck += TreeAfterCheck;
+        _reportTimer.Tick += (_, _) => {
+            _reportTimer.Stop();
+            RefreshOutputForCurrentSelection();
+        };
+
+        _tree.AfterSelect += (_, _) => ScheduleOutputRefresh();
+        _tree.NodeMouseClick += TreeNodeMouseClick;
+    }
+    private void TreeNodeMouseClick(object? sender, TreeNodeMouseClickEventArgs e) {
+        var hit = _tree.HitTest(e.Location);
+
+        if (hit.Node is null)
+            return;
+
+        if ((hit.Location & TreeViewHitTestLocations.StateImage) == 0)
+            return;
+
+        if (hit.Node.Tag is not ProjectNode model)
+            return;
+
+        bool include = !IsModelNodeFullyIncluded(model);
+
+        SetIncludedForNode(hit.Node, include);
+        SyncTreeChecksFromIncludedFiles();
+
+        _tree.SelectedNode = hit.Node;
+
+        ScheduleOutputRefresh();
     }
 
+    private void ScheduleOutputRefresh() {
+        _reportTimer.Stop();
+        _reportTimer.Start();
+    }
 
-    private void TreeAfterCheck(object? sender, TreeViewEventArgs e) {
+    private void ResetIncludedFilePaths() {
+        _includedFilePaths.Clear();
+
+        foreach (var solution in _solutions) {
+            foreach (var file in solution.DescendantsAndSelf().Where(x => x.Kind == NodeKind.File))
+                _includedFilePaths.Add(file.FullPath);
+        }
+    }
+
+    private void SetIncludedForNode(TreeNode treeNode, bool include) {
+        if (treeNode.Tag is not ProjectNode model)
+            return;
+
+        foreach (var file in model.DescendantsAndSelf().Where(x => x.Kind == NodeKind.File)) {
+            if (include)
+                _includedFilePaths.Add(file.FullPath);
+            else
+                _includedFilePaths.Remove(file.FullPath);
+        }
+    }
+
+    private void SyncTreeChecksFromIncludedFiles() {
         if (_isUpdatingChecks)
             return;
 
         try {
             _isUpdatingChecks = true;
 
-            // user toggled node -> cascade same val down
-            SetCheckedRecursive(e.Node, e.Node.Checked);
+            _tree.BeginUpdate();
 
-            // update parents upward
-            UpdateParentCheckState(e.Node.Parent);
+            foreach (TreeNode root in _tree.Nodes)
+                ApplyCheckStateFromIncludedFiles(root);
         }
         finally {
+            _tree.EndUpdate();
             _isUpdatingChecks = false;
         }
-
-        RefreshOutputForCurrentSelection();
     }
 
-    private void SetCheckedRecursive(TreeNode node, bool isChecked) {
-        foreach (TreeNode child in node.Nodes) {
-            if (child.Checked != isChecked)
-                child.Checked = isChecked;
+    private void ApplyCheckStateFromIncludedFiles(TreeNode treeNode) {
+        if (treeNode.Tag is ProjectNode model) {
+            int state = IsModelNodeFullyIncluded(model) ? 1 : 0;
 
-            SetCheckedRecursive(child, isChecked);
+            if (treeNode.StateImageIndex != state)
+                treeNode.StateImageIndex = state;
         }
-    }
-
-    private void UpdateParentCheckState(TreeNode? node) {
-        while (node is not null) {
-            bool anyChecked = false;
-
-            foreach (TreeNode child in node.Nodes) {
-                if (child.Checked) {
-                    anyChecked = true;
-                    break;
-                }
-            }
-
-            if (node.Checked != anyChecked)
-                node.Checked = anyChecked;
-
-            node = node.Parent;
-        }
-    }
-
-    private HashSet<ProjectNode> GetCheckedModelNodes() {
-        var result = new HashSet<ProjectNode>();
-
-        foreach (TreeNode root in _tree.Nodes)
-            CollectCheckedModelNodes(root, result);
-
-        return result;
-    }
-
-    private void CollectCheckedModelNodes(TreeNode treeNode, HashSet<ProjectNode> acc) {
-        if (treeNode.Checked && treeNode.Tag is ProjectNode model)
-            acc.Add(model);
 
         foreach (TreeNode child in treeNode.Nodes)
-            CollectCheckedModelNodes(child, acc);
+            ApplyCheckStateFromIncludedFiles(child);
+    }
+
+    private bool IsModelNodeFullyIncluded(ProjectNode model) {
+        bool hasFiles = false;
+
+        foreach (var file in model.DescendantsAndSelf().Where(x => x.Kind == NodeKind.File)) {
+            hasFiles = true;
+
+            if (!_includedFilePaths.Contains(file.FullPath))
+                return false;
+        }
+
+        return hasFiles;
     }
 
     private void RefreshOutputForCurrentSelection() {
         if (_tree.SelectedNode?.Tag is not ProjectNode node)
             return;
 
+        if (_isGeneratingReport)
+            return;
+
         try {
+            _isGeneratingReport = true;
+
+            _tree.Cursor = Cursors.WaitCursor;
+            _rtbOutput.Cursor = Cursors.WaitCursor;
+
             _rtbOutput.Clear();
 
-            var includedNodes = GetCheckedModelNodes();
-            _rtbOutput.Text = ProjectScanner.BuildReportForSelection(node, includedNodes);
+            // snapshot, to ensure the summary is built from a stable state
+            var includedSnapshot = new HashSet<string>(_includedFilePaths, StringComparer.OrdinalIgnoreCase);
+            _rtbOutput.Text = ProjectScanner.BuildReportForSelection(node, includedSnapshot);
 
             _rtbOutput.SelectionStart = 0;
             _rtbOutput.SelectionLength = 0;
@@ -293,10 +378,16 @@ public sealed  class MainForm : Form {
         catch (Exception ex) {
             MessageBox.Show(
                 this,
-                $"Не получилось построить отчёт по выбранному узлу.\n{ex.Message}",
-                "Ошибка",
+                $"Failed to generate report for the selected node.\n{ex.Message}",
+                "Error",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+        }
+        finally {
+            _rtbOutput.Cursor = Cursors.IBeam;
+            _tree.Cursor = Cursors.Default;
+
+            _isGeneratingReport = false;
         }
     }
 
@@ -306,8 +397,8 @@ public sealed  class MainForm : Form {
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) {
             MessageBox.Show(
                 this,
-                "Папка не найдена. Выбери корректный путь.",
-                "Ошибка",
+                "Folder not found. Please select a valid path.",
+                "Error",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
             return;
@@ -315,6 +406,7 @@ public sealed  class MainForm : Form {
 
         try {
             _solutions = ProjectScanner.BuildTree(folder);
+            ResetIncludedFilePaths();
 
             _tree.BeginUpdate();
             _tree.Nodes.Clear();
@@ -338,8 +430,8 @@ public sealed  class MainForm : Form {
         catch (Exception ex) {
             MessageBox.Show(
                 this,
-                $"Не получилось просканировать структуру.\n{ex.Message}",
-                "Ошибка",
+                $"Failed to scan the structure.\n{ex.Message}",
+                "Error",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -353,7 +445,7 @@ public sealed  class MainForm : Form {
             ImageKey = key,
             SelectedImageKey = key,
             ToolTipText = model.FullPath,
-            Checked = true
+            StateImageIndex = IsModelNodeFullyIncluded(model) ? 1 : 0
         };
 
         foreach (var child in model.Children)
