@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace ProjectStructureSummary;
+namespace PromptContextBuilder;
 
 public enum NodeKind
 {

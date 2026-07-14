@@ -1,4 +1,4 @@
-namespace ProjectStructureSummary
+namespace PromptContextBuilder
 {
     internal static class Program
     {
