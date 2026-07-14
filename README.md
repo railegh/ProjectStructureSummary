@@ -108,10 +108,7 @@ Acknowledge and wait for further instructions:
 
 ## Screenshot
 
-```md
 ![Project Structure Summary screenshot](docs/screenshot.png)
-```
-
 
 ## License
 
