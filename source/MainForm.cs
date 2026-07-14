@@ -38,6 +38,11 @@ public sealed  class MainForm : Form {
         MinimumSize = new Size(1200, 720);
         ClientSize = new Size(1280, 800); // important: adequate starting size
 
+
+        var appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        if (appIcon is not null)
+            Icon = appIcon;
+
         BuildUi();
         WireEvents();
     }

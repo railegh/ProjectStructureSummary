@@ -7,7 +7,13 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <PackageIcon>source-code-512.png</PackageIcon>
+    <ApplicationIcon>res\source-code-256.ico</ApplicationIcon>
+    <StartupObject>ProjectStructureSummary.Program</StartupObject>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="res\source-code-256.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Update="res\source-code-512.png">
