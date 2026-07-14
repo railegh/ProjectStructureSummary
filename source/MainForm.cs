@@ -33,7 +33,7 @@ public sealed  class MainForm : Form {
 
 
     public MainForm() {
-        Text = "C# Solution Explorer + Structure/Code Viewer";
+        Text = "C# Prompt Context Builder";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1200, 720);
         ClientSize = new Size(1280, 800); // important: adequate starting size

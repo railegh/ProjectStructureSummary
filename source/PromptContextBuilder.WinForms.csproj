@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<Nullable>enable</Nullable>
+		<UseWindowsForms>true</UseWindowsForms>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<PackageIcon>source-code-512.png</PackageIcon>
+		<ApplicationIcon>res\source-code-256.ico</ApplicationIcon>
+		<StartupObject>ProjectStructureSummary.Program</StartupObject>
+		<AssemblyName>PromptContextBuilder.WinForms</AssemblyName>
+		<RootNamespace>PromptContextBuilder</RootNamespace>
+		<Product>C# Prompt Context Builder</Product>
+		<Description>Prompt context builder for C# projects and AI coding assistants.</Description>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Content Include="res\source-code-256.ico" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="res\source-code-512.png">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Update="res\source-code.ico">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+
+</Project>
